@@ -7,6 +7,7 @@ from seahorse.utils.custom_exceptions import MethodNotImplementedError
 from seahorse.game.light_action import LightAction
 import numpy as np
 import heapq
+import time
 
 import math as math
 
@@ -28,15 +29,45 @@ class MyPlayer(PlayerHex):
         """
         super().__init__(piece_type, name)
     
-    def heuristic_parameters(self):
-        return [1.0, 1.0, 1.0]
+    def heuristic_parameters(self, state: GameState, nb_maillons: int):
+        #TODO : update selon l'avancée de la game
+        '''if nb_maillons > 7 and state.step > 8:
+            return [state.step//2, 0.0, 0.0]
+        elif nb_maillons > 7 and state.step <= 8:
+            return [state.step//2, 0.0, 0.1]
+        elif nb_maillons <= 7 and state.step <= 8:
+            return [state.step//2, 0.5, 0.1]
+        else:
+            return [state.step//2, 0.5, 0.0]'''
+        if nb_maillons > 7 and state.step > 8:
+            return [1.0, 0.0, 0.0]
+        elif nb_maillons > 7 and state.step <= 8:
+            return [1.0, 0.0, 0.1]
+        elif nb_maillons <= 7 and state.step <= 8:
+            return [1.0, 0.5, 0.1]
+        else:
+            return [1.0, 0.5, 0.0]
     
-    def halpha_beta_strat(self, currentState: GameState, heuristic):
+    def halpha_beta_strat(self, currentState: GameState, heuristic, remaining_time: int, depth_allowed: int):
+        
+        start = time.time()
+        time_to_play = remaining_time/(max(abs(13 - depth_allowed - currentState.step//2), 1e-4))
+        
+        # Identify if we are player1 or player2
+        player1, player2 = currentState.players[0].id, currentState.players[1].id
+        opponent_piece_type = currentState.next_player.get_piece_type()
+        if opponent_piece_type == "R":
+            id_me = player2
+            id_opponent = player1
+        else:
+            id_me = player1
+            id_opponent = player2
         
         def max_value(state: GameState, alpha, beta, depth):
+            elapsed_time = time.time() - start
             if state.is_done():
-                return (state.scores[state.players[1].id], state.scores[state.players[0].id])
-            elif (not state.is_done()) and depth == 0: # Si l'on a atteint la profondeur max à un état non terminal
+                return (state.scores[id_me], state.scores[id_opponent])
+            elif (not state.is_done()) and (depth == 0 or elapsed_time > time_to_play): # Si l'on a atteint la profondeur max à un état non terminal ou si le temps accordé pour jouer est épuisé
                 return (heuristic(state), -heuristic(state)) # Jeu à somme nulle : le score d'un joueur est l'opposé de l'autre
             else:
                 v_star = -1.0*math.inf
@@ -53,9 +84,10 @@ class MyPlayer(PlayerHex):
                 return (v_star, m_star)
 
         def min_value(state: GameState, alpha, beta, depth):
+            elapsed_time = time.time() - start
             if state.is_done():
-                return (state.scores[state.players[1].id], state.scores[state.players[0].id])
-            elif (not state.is_done()) and depth == 0: # Si l'on a atteint la profondeur max à un état non terminal
+                return (state.scores[id_me], state.scores[id_opponent])
+            elif (not state.is_done()) and (depth == 0 or elapsed_time > time_to_play): # Si l'on a atteint la profondeur max à un état non terminal
                 return (heuristic(state), -heuristic(state)) # Jeu à somme nulle : le score d'un joueur est l'opposé de l'autre
             else:
                 v_star = math.inf
@@ -70,10 +102,8 @@ class MyPlayer(PlayerHex):
                         if v_star <= alpha:
                             return (v_star, m_star)
                 return (v_star, m_star)
-        return max_value(currentState, -math.inf, math.inf, 2)
+        return max_value(currentState, -math.inf, math.inf, depth_allowed)
 
-    def naive_heuristic(self, state: GameState):
-        return 0 if not state.is_done() else state.get_player_score(self)
 
     def heuristic_territory(self, state: GameState):
         # Pour toute pièce sous notre contrôle, on calcule le nombre de voisins libres = calcul du territoire
@@ -121,52 +151,80 @@ class MyPlayer(PlayerHex):
         env = current_rep.env
         
         nb_maillons = 0
+        
         if self.piece_type == "R": #i.e. we are the first player to play
             # Get all the red cases already played
             nb_red_cases, red_cases = current_rep.get_pieces_player(state.players[0])
             for red_case in red_cases:
                 i, j = red_case
-                # Check au Sud Ouest si on a un maillon
-                if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) == None and env.get((i+1,j-1)) == None and env.get((i+1,j-2)).piece_type == self.piece_type:
-                    nb_maillons += 1
-                # Check au Nord Ouest si on a un maillon
-                elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) == None and env.get((i-1,j)) == None and env.get((i-1,j-1)).piece_type == self.piece_type:
-                    nb_maillons += 1
-                # Check au Nord si on a un maillon
-                elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) == None and env.get((i-1,j+1)) == None and env.get((i-2,j+1)).piece_type == self.piece_type:
-                    nb_maillons += 1
-                # Check au Nord Est si on a un maillon
-                elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) == None and env.get((i-1,j+1)) == None and env.get((i-1,j+2)).piece_type == self.piece_type:
-                    nb_maillons += 1
-                # Check au Sud Est si on a un maillon
-                elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) == None and env.get((i+1,j)) == None and env.get((i+1,j+1)).piece_type == self.piece_type:
-                    nb_maillons += 1
-                # Check au Sud si on a un maillon
-                elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j-1)) == None and env.get((i+1,j)) == None and env.get((i+2,j-1)).piece_type == self.piece_type:
-                    nb_maillons += 1
+                ## ------------- DETECTION DE MAILLONS INTERNES --------------------- ##
+                if i > 1 and i < 12:
+                    # Check au Sud Ouest si on a un maillon
+                    if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) == None and env.get((i+1,j-1)) == None and env.get((i+1,j-2)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                    # Check au Nord Ouest si on a un maillon
+                    elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) == None and env.get((i-1,j)) == None and env.get((i-1,j-1)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                    # Check au Nord si on a un maillon
+                    elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) == None and env.get((i-1,j+1)) == None and env.get((i-2,j+1)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                    # Check au Nord Est si on a un maillon
+                    elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) == None and env.get((i-1,j+1)) == None and env.get((i-1,j+2)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                    # Check au Sud Est si on a un maillon
+                    elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) == None and env.get((i+1,j)) == None and env.get((i+1,j+1)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                    # Check au Sud si on a un maillon
+                    elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j-1)) == None and env.get((i+1,j)) == None and env.get((i+2,j-1)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                        
+                ## ------------- DETECTION DE MAILLONS AUX BORDS --------------------- ##
+                else:
+                    # Check si on a des maillons à la frontière nord
+                    if i == 1:
+                        if j >= 1 and j<= 12 and env.get((i-1,j)) == None and env.get((i-1,j+1)) == None:
+                            nb_maillons += 1
+                    # Check si on a des maillons à la frontière sud
+                    elif i == 12:
+                        if j >= 1 and j<= 12 and env.get((i+1,j)) == None and env.get((i+1,j-1)) == None:
+                            nb_maillons += 1
+        
         else: #the color is blue
             # Get all the red cases already played
             nb_blue_cases, blue_cases = current_rep.get_pieces_player(state.players[1])
             for blue_case in blue_cases:
                 i, j = blue_case
-                # Check au Sud Ouest si on a un maillon
-                if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) == None and env.get((i+1,j-1)) == None and env.get((i+1,j-2)).piece_type == self.piece_type:
-                    nb_maillons += 1
-                # Check au Nord Ouest si on a un maillon
-                elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) == None and env.get((i-1,j)) == None and env.get((i-1,j-1)).piece_type == self.piece_type:
-                    nb_maillons += 1
-                # Check au Nord si on a un maillon
-                elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) == None and env.get((i-1,j+1)) == None and env.get((i-2,j+1)).piece_type == self.piece_type:
-                    nb_maillons += 1
-                # Check au Nord Est si on a un maillon
-                elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) == None and env.get((i-1,j+1)) == None and env.get((i-1,j+2)).piece_type == self.piece_type:
-                    nb_maillons += 1
-                # Check au Sud Est si on a un maillon
-                elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) == None and env.get((i+1,j)) == None and env.get((i+1,j+1)).piece_type == self.piece_type:
-                    nb_maillons += 1
-                # Check au Sud si on a un maillon
-                elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j-1)) == None and env.get((i+1,j)) == None and env.get((i+2,j-1)).piece_type == self.piece_type:
-                    nb_maillons += 1     
+                ## ------------- DETECTION DE MAILLONS INTERNES --------------------- ##
+                if j > 1 and j < 12:
+                    # Check au Sud Ouest si on a un maillon
+                    if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) == None and env.get((i+1,j-1)) == None and env.get((i+1,j-2)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                    # Check au Nord Ouest si on a un maillon
+                    elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) == None and env.get((i-1,j)) == None and env.get((i-1,j-1)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                    # Check au Nord si on a un maillon
+                    elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) == None and env.get((i-1,j+1)) == None and env.get((i-2,j+1)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                    # Check au Nord Est si on a un maillon
+                    elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) == None and env.get((i-1,j+1)) == None and env.get((i-1,j+2)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                    # Check au Sud Est si on a un maillon
+                    elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) == None and env.get((i+1,j)) == None and env.get((i+1,j+1)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                    # Check au Sud si on a un maillon
+                    elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j-1)) == None and env.get((i+1,j)) == None and env.get((i+2,j-1)).piece_type == self.piece_type:
+                        nb_maillons += 1
+                
+                ## ------------- DETECTION DE MAILLONS AUX BORDS --------------------- ##
+                else:
+                    if j == 1:
+                        if i >= 1 and i <= 12 and env.get((i,j-1)) == None and env.get((i+1,j-1)) == None:
+                            nb_maillons += 1
+                    # Check si on a des maillons à la frontière est
+                    elif j == 12:
+                        if i >= 1 and i <= 12 and env.get((i,j+1)) == None and env.get((i-1,j+1)) == None:
+                            nb_maillons += 1
+                
         return nb_maillons
     
     def shortest_path(self, state: GameState):
@@ -228,12 +286,15 @@ class MyPlayer(PlayerHex):
                 if new_dist < dist[ni, nj]:
                     dist[ni, nj] = new_dist
                     heapq.heappush(pq, (new_dist, (ni, nj), (i, j)))
-        dist = heapq.heappop(pq)[0]
-        return dist
+        if len(pq) > 0:
+            dist = heapq.heappop(pq)[0]
+            return dist
+        else:
+            return 0
     
     def heuristic_shortest_path(self, state: GameState):
         # Reconstruit le même état mais pour l'autre joueur (adversaire)
-        current_rep = state.get_rep()
+        '''current_rep = state.get_rep()
         env = current_rep.get_env()
         d = current_rep.get_dimensions()
         board = BoardHex(env=env, dim=d)
@@ -243,15 +304,25 @@ class MyPlayer(PlayerHex):
             state.players,
             board,
             step=state.step,
-        )
+        )'''
         
         my_shortest_path = self.shortest_path(state)
-        opponent_shortest_path = self.shortest_path(state_opponent)
-        return opponent_shortest_path - my_shortest_path
+        #opponent_shortest_path = self.shortest_path(state_opponent)
+        return 13 - my_shortest_path # 13 est la longueur du chemin en ligne droite 
         
     
-    def master_heuristic(self, state: GameState):
-        return self.heuristic_parameters()[0]*self.heuristic_shortest_path(state) + self.heuristic_parameters()[1]*self.heuristic_maillon(state) #+ self.heuristic_parameters()[2]*self.heuristic_territory(state)
+    def master_heuristic(self, state:GameState):
+        nb_maillons = self.heuristic_maillon(state)
+        params = self.heuristic_parameters(state, nb_maillons)
+        pcc = self.heuristic_shortest_path(state)
+        if params[0]*pcc - params[1]*nb_maillons > 3: # heuristique de PCC est trop forte
+            params[0] = (2 + params[1]*nb_maillons)/pcc # ajuste le paramètre de l'heuristique pour repasser sous une valeur seuil
+        elif params[0]*pcc - params[1]*nb_maillons < -3: # heuristique du nmobre de maillons est trop forte
+            params[1] = (params[0]*pcc - 2)/nb_maillons # ajuste le paramètre de l'heuristique pour repasser sous une valeur seuil
+        if params[2] == 0:
+            return (params[0]*pcc + params[1]*nb_maillons)/10
+        else:
+            return (params[0]*pcc + params[1]*nb_maillons + params[2]*self.heuristic_territory(state))/10
             
 
     def compute_action(self, current_state: GameState, remaining_time: int = 1e9, **kwargs) -> Action:
@@ -267,40 +338,45 @@ class MyPlayer(PlayerHex):
         possible_actions = current_state.get_possible_light_actions()
         current_rep = current_state.get_rep()
         env = current_rep.env
+        print(current_state.step)
         
         # Opening moves
-        if current_state.step <= 2:
+        if current_state.step < 2:
             if self.piece_type == "R":
                 if current_state.step == 0: #premier tour à jouer pour les rouge (toujours possible de jouer)
-                    opening = LightAction({"piece": self.piece_type, "position": (2, 3)})
+                    opening = LightAction({"piece": self.piece_type, "position": (1, 2)})
                     return opening
             else:
-                opening = LightAction({"piece": self.piece_type, "position": (5, 9)})
+                opening = LightAction({"piece": self.piece_type, "position": (4, 8)})
                 if opening in possible_actions:
                     return opening
                 else: # If our opening is already taken, try to counter it
-                    return LightAction({"piece": self.piece_type, "position": (9, 5)})
+                    return LightAction({"piece": self.piece_type, "position": (8, 4)})
         
         # First Answer moves
-        elif current_state.step <= 4:
+        elif current_state.step < 4:
             if self.piece_type == "R":
                 if current_state.step == 2: #second tour à jouer pour les rouge (toujours possible de jouer)
                     nb_blue_cases, blue_cases = current_rep.get_pieces_player(current_state.players[1])
-                    if blue_cases[0] == (5, 9):
-                        first_answer = LightAction({"piece": self.piece_type, "position": (10, 9)})
+                    if blue_cases[0] == (4, 8):
+                        first_answer = LightAction({"piece": self.piece_type, "position": (9, 8)})
                         return first_answer
                     else:
-                        return LightAction({"piece": self.piece_type, "position": (5, 9)})
+                        return LightAction({"piece": self.piece_type, "position": (4, 8)})
             else:
                 nb_red_cases, red_cases = current_rep.get_pieces_player(current_state.players[0])
-                if red_cases[-1] == (10, 9):
-                    first_answer = LightAction({"piece": self.piece_type, "position": (9, 5)})
+                if red_cases[-1] == (9, 8):
+                    first_answer = LightAction({"piece": self.piece_type, "position": (8, 4)})
                     if first_answer in possible_actions:
                         return opening
-                    elif LightAction({"piece": self.piece_type, "position": (5, 9)}) in possible_actions: # If our opening is already taken, try to counter it
-                        return LightAction({"piece": self.piece_type, "position": (5, 9)})
+                    elif LightAction({"piece": self.piece_type, "position": (4, 8)}) in possible_actions: # If our opening is already taken, try to counter it
+                        return LightAction({"piece": self.piece_type, "position": (4, 8)})
                     else:
-                        return LightAction({"piece": self.piece_type, "position": (4, 5)})
+                        return LightAction({"piece": self.piece_type, "position": (3, 4)})
+                else:
+                    first_answer = LightAction({"piece": self.piece_type, "position": (10, 3)})
+                    if first_answer in possible_actions:
+                        return first_answer
         
         # General strategy : alpha-beta pruning with heuristic
         #(val, move) = self.halpha_beta_strat(current_state, heuristic=self.master_heuristic)
@@ -314,91 +390,135 @@ class MyPlayer(PlayerHex):
             piece_type_opponent = "B"
             for red_case in red_cases:
                 i, j = red_case
-                # Maillon Sud Ouest menacé (cas 1)
-                if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) != None and env.get((i+1,j-1)) == None and env.get((i,j-1)).piece_type == piece_type_opponent and env.get((i+1,j-2)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
-                # Maillon Sud Ouest menacé (cas 2)
-                if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) == None and env.get((i+1,j-1)) != None and env.get((i+1,j-1)).piece_type == piece_type_opponent and env.get((i+1,j-2)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i, j-1)})
-                # Maillon Nord Ouest menacé (cas 1)
-                elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) != None and env.get((i-1,j)) == None and env.get((i,j-1)).piece_type == piece_type_opponent and env.get((i-1,j-1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i-1, j)})
-                # Maillon Nord Ouest menacé (cas 2)
-                elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) == None and env.get((i-1,j)) != None and env.get((i-1,j)).piece_type == piece_type_opponent and env.get((i-1,j-1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i, j-1)})
-                # Maillon Nord menacé (cas 1)
-                elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) != None and env.get((i-1,j+1)) == None and env.get((i-1,j)).piece_type == piece_type_opponent and env.get((i-2,j+1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
-                # Maillon Nord menacé (cas 2)
-                elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) == None and env.get((i-1,j+1)) != None and env.get((i-1,j+1)).piece_type == piece_type_opponent and env.get((i-2,j+1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i-1, j)})
-                # Maillon Nord Est menacé (cas 1)
-                elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) != None and env.get((i-1,j+1)) == None and env.get((i,j+1)).piece_type == piece_type_opponent and env.get((i-1,j+2)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
-                # Maillon Nord Est menacé (cas 2)
-                elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) == None and env.get((i-1,j+1)) != None and env.get((i-1,j+1)).piece_type == piece_type_opponent and env.get((i-1,j+2)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i, j+1)})
-                # Maillon Sud Est menacé (cas 1)
-                elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) != None and env.get((i+1,j)) == None and env.get((i,j+1)).piece_type == piece_type_opponent and env.get((i+1,j+1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i+1, j)})
-                # Maillon Sud Est menacé (cas 2)
-                elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) == None and env.get((i+1,j)) != None and env.get((i+1,j)).piece_type == piece_type_opponent and env.get((i+1,j+1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i, j+1)})
-                # Maillon Sud menacé (cas 1)
-                elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j)) != None and env.get((i+1,j-1)) == None and env.get((i+1,j)).piece_type == piece_type_opponent and env.get((i+2,j-1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
-                # Maillon Sud menacé (cas 2)
-                elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j)) == None and env.get((i+1,j-1)) != None and env.get((i+1,j-1)).piece_type == piece_type_opponent and env.get((i+2,j-1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i+1, j)})
+                ## ------------- DETECTION DE MAILLONS INTERNES --------------------- ##
+                if i > 1 and i < 12:
+                    # Maillon Sud Ouest menacé (cas 1)
+                    if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) != None and env.get((i+1,j-1)) == None and env.get((i,j-1)).piece_type == piece_type_opponent and env.get((i+1,j-2)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
+                    # Maillon Sud Ouest menacé (cas 2)
+                    if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) == None and env.get((i+1,j-1)) != None and env.get((i+1,j-1)).piece_type == piece_type_opponent and env.get((i+1,j-2)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i, j-1)})
+                    # Maillon Nord Ouest menacé (cas 1)
+                    elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) != None and env.get((i-1,j)) == None and env.get((i,j-1)).piece_type == piece_type_opponent and env.get((i-1,j-1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i-1, j)})
+                    # Maillon Nord Ouest menacé (cas 2)
+                    elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) == None and env.get((i-1,j)) != None and env.get((i-1,j)).piece_type == piece_type_opponent and env.get((i-1,j-1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i, j-1)})
+                    # Maillon Nord menacé (cas 1)
+                    elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) != None and env.get((i-1,j+1)) == None and env.get((i-1,j)).piece_type == piece_type_opponent and env.get((i-2,j+1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
+                    # Maillon Nord menacé (cas 2)
+                    elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) == None and env.get((i-1,j+1)) != None and env.get((i-1,j+1)).piece_type == piece_type_opponent and env.get((i-2,j+1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i-1, j)})
+                    # Maillon Nord Est menacé (cas 1)
+                    elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) != None and env.get((i-1,j+1)) == None and env.get((i,j+1)).piece_type == piece_type_opponent and env.get((i-1,j+2)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
+                    # Maillon Nord Est menacé (cas 2)
+                    elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) == None and env.get((i-1,j+1)) != None and env.get((i-1,j+1)).piece_type == piece_type_opponent and env.get((i-1,j+2)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i, j+1)})
+                    # Maillon Sud Est menacé (cas 1)
+                    elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) != None and env.get((i+1,j)) == None and env.get((i,j+1)).piece_type == piece_type_opponent and env.get((i+1,j+1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i+1, j)})
+                    # Maillon Sud Est menacé (cas 2)
+                    elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) == None and env.get((i+1,j)) != None and env.get((i+1,j)).piece_type == piece_type_opponent and env.get((i+1,j+1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i, j+1)})
+                    # Maillon Sud menacé (cas 1)
+                    elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j)) != None and env.get((i+1,j-1)) == None and env.get((i+1,j)).piece_type == piece_type_opponent and env.get((i+2,j-1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
+                    # Maillon Sud menacé (cas 2)
+                    elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j)) == None and env.get((i+1,j-1)) != None and env.get((i+1,j-1)).piece_type == piece_type_opponent and env.get((i+2,j-1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i+1, j)})
+                
+                ## ------------- DETECTION DE MAILLONS AUX BORDS --------------------- ##
+                else:
+                    # Check les maillons à la frontière nord
+                    if i == 1:
+                        # Maillon nord menacé (cas 1)
+                        if j >= 1 and j<= 12 and env.get((i-1,j)) != None and env.get((i-1,j+1)) == None:
+                            return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
+                        # Maillon nord menacé (cas 2)
+                        elif j >= 1 and j<= 12 and env.get((i-1,j)) == None and env.get((i-1,j+1)) != None:
+                            return LightAction({"piece": self.piece_type, "position": (i-1, j)})
+                    # Check les maillons à la frontière sud
+                    elif i == 12:
+                        # Maillon sud menacé (cas 1)
+                        if j >= 1 and j<= 12 and env.get((i+1,j)) != None and env.get((i+1,j-1)) == None:
+                            return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
+                        # Maillon sud menacé (cas 2)
+                        if j >= 1 and j<= 12 and env.get((i+1,j)) == None and env.get((i+1,j-1)) != None:
+                            return LightAction({"piece": self.piece_type, "position": (i+1, j)})
+
         else: #the color is blue
             # Get all the red cases already played
             nb_blue_cases, blue_cases = current_rep.get_pieces_player(current_state.players[1])
             piece_type_opponent = "R"
             for blue_case in blue_cases:
                 i, j = blue_case
-                # Maillon Sud Ouest menacé (cas 1)
-                if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) != None and env.get((i+1,j-1)) == None and env.get((i,j-1)).piece_type == piece_type_opponent and env.get((i+1,j-2)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
-                # Maillon Sud Ouest menacé (cas 2)
-                if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) == None and env.get((i+1,j-1)) != None and env.get((i+1,j-1)).piece_type == piece_type_opponent and env.get((i+1,j-2)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i, j-1)})
-                # Maillon Nord Ouest menacé (cas 1)
-                elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) != None and env.get((i-1,j)) == None and env.get((i,j-1)).piece_type == piece_type_opponent and env.get((i-1,j-1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i-1, j)})
-                # Maillon Nord Ouest menacé (cas 2)
-                elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) == None and env.get((i-1,j)) != None and env.get((i-1,j)).piece_type == piece_type_opponent and env.get((i-1,j-1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i, j-1)})
-                # Maillon Nord menacé (cas 1)
-                elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) != None and env.get((i-1,j+1)) == None and env.get((i-1,j)).piece_type == piece_type_opponent and env.get((i-2,j+1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
-                # Maillon Nord menacé (cas 2)
-                elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) == None and env.get((i-1,j+1)) != None and env.get((i-1,j+1)).piece_type == piece_type_opponent and env.get((i-2,j+1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i-1, j)})
-                # Maillon Nord Est menacé (cas 1)
-                elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) != None and env.get((i-1,j+1)) == None and env.get((i,j+1)).piece_type == piece_type_opponent and env.get((i-1,j+2)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
-                # Maillon Nord Est menacé (cas 2)
-                elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) == None and env.get((i-1,j+1)) != None and env.get((i-1,j+1)).piece_type == piece_type_opponent and env.get((i-1,j+2)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i, j+1)})
-                # Maillon Sud Est menacé (cas 1)
-                elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) != None and env.get((i+1,j)) == None and env.get((i,j+1)).piece_type == piece_type_opponent and env.get((i+1,j+1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i+1, j)})
-                # Maillon Sud Est menacé (cas 2)
-                elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) == None and env.get((i+1,j)) != None and env.get((i+1,j)).piece_type == piece_type_opponent and env.get((i+1,j+1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i, j+1)})
-                # Maillon Sud menacé (cas 1)
-                elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j)) != None and env.get((i+1,j-1)) == None and env.get((i+1,j)).piece_type == piece_type_opponent and env.get((i+2,j-1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
-                # Maillon Sud menacé (cas 2)
-                elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j)) == None and env.get((i+1,j-1)) != None and env.get((i+1,j-1)).piece_type == piece_type_opponent and env.get((i+2,j-1)).piece_type == self.piece_type:
-                    return LightAction({"piece": self.piece_type, "position": (i+1, j)})
+                ## ------------- DETECTION DE MAILLONS INTERNES --------------------- ##
+                if j > 1 and j < 12:
+                    # Maillon Sud Ouest menacé (cas 1)
+                    if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) != None and env.get((i+1,j-1)) == None and env.get((i,j-1)).piece_type == piece_type_opponent and env.get((i+1,j-2)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
+                    # Maillon Sud Ouest menacé (cas 2)
+                    if i+1 <= current_rep.dimensions[0] and j-2 >= 0*current_rep.dimensions[1] and env.get((i+1,j-2)) != None and env.get((i,j-1)) == None and env.get((i+1,j-1)) != None and env.get((i+1,j-1)).piece_type == piece_type_opponent and env.get((i+1,j-2)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i, j-1)})
+                    # Maillon Nord Ouest menacé (cas 1)
+                    elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) != None and env.get((i-1,j)) == None and env.get((i,j-1)).piece_type == piece_type_opponent and env.get((i-1,j-1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i-1, j)})
+                    # Maillon Nord Ouest menacé (cas 2)
+                    elif i-1 >= 0*current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i-1,j-1)) != None and env.get((i,j-1)) == None and env.get((i-1,j)) != None and env.get((i-1,j)).piece_type == piece_type_opponent and env.get((i-1,j-1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i, j-1)})
+                    # Maillon Nord menacé (cas 1)
+                    elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) != None and env.get((i-1,j+1)) == None and env.get((i-1,j)).piece_type == piece_type_opponent and env.get((i-2,j+1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
+                    # Maillon Nord menacé (cas 2)
+                    elif i-2 >= 0*current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i-2,j+1)) != None and env.get((i-1,j)) == None and env.get((i-1,j+1)) != None and env.get((i-1,j+1)).piece_type == piece_type_opponent and env.get((i-2,j+1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i-1, j)})
+                    # Maillon Nord Est menacé (cas 1)
+                    elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) != None and env.get((i-1,j+1)) == None and env.get((i,j+1)).piece_type == piece_type_opponent and env.get((i-1,j+2)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
+                    # Maillon Nord Est menacé (cas 2)
+                    elif i-1 >= 0*current_rep.dimensions[0] and j+2 <= current_rep.dimensions[1] and env.get((i-1,j+2)) != None and env.get((i,j+1)) == None and env.get((i-1,j+1)) != None and env.get((i-1,j+1)).piece_type == piece_type_opponent and env.get((i-1,j+2)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i, j+1)})
+                    # Maillon Sud Est menacé (cas 1)
+                    elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) != None and env.get((i+1,j)) == None and env.get((i,j+1)).piece_type == piece_type_opponent and env.get((i+1,j+1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i+1, j)})
+                    # Maillon Sud Est menacé (cas 2)
+                    elif i+1 <= current_rep.dimensions[0] and j+1 <= current_rep.dimensions[1] and env.get((i+1,j+1)) != None and env.get((i,j+1)) == None and env.get((i+1,j)) != None and env.get((i+1,j)).piece_type == piece_type_opponent and env.get((i+1,j+1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i, j+1)})
+                    # Maillon Sud menacé (cas 1)
+                    elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j)) != None and env.get((i+1,j-1)) == None and env.get((i+1,j)).piece_type == piece_type_opponent and env.get((i+2,j-1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
+                    # Maillon Sud menacé (cas 2)
+                    elif i+2 <= current_rep.dimensions[0] and j-1 >= 0*current_rep.dimensions[1] and env.get((i+2,j-1)) != None and env.get((i+1,j)) == None and env.get((i+1,j-1)) != None and env.get((i+1,j-1)).piece_type == piece_type_opponent and env.get((i+2,j-1)).piece_type == self.piece_type:
+                        return LightAction({"piece": self.piece_type, "position": (i+1, j)})
+                
+                ## ------------- DETECTION DE MAILLONS AUX BORDS --------------------- ##
+                else:
+                    # Check les maillons à la frontière ouest
+                    if j == 1:
+                        # Maillon ouest menacé (cas 1)
+                        if i >= 1 and i <= 12 and env.get((i,j-1)) != None and env.get((i+1,j-1)) == None:
+                            return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
+                        # Maillon ouest menacé (cas 2)
+                        elif i >= 1 and i <= 12 and env.get((i,j-1)) == None and env.get((i+1,j-1)) != None:
+                            return LightAction({"piece": self.piece_type, "position": (i, j-1)})
+                    # Check les maillons à la frontière est
+                    elif j == 12:
+                        # Maillon est menacé (cas 1)
+                        if i >= 1 and i <= 12 and env.get((i,j+1)) != None and env.get((i-1,j+1)) == None:
+                            return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
+                        # Maillon est menacé (cas 2)
+                        if i >= 1 and i <= 12 and env.get((i,j+1)) == None and env.get((i-1,j+1)) != None:
+                            return LightAction({"piece": self.piece_type, "position": (i, j+1)})
+        
         # Si aucun maillon n'est menacé, on prend le move donné par alpha-beta
         print("-------------------------------------")
         print("------ AUCUN MAILLON DE MENACE ------")
         print("-------------------------------------")
-        (val, move) = self.halpha_beta_strat(current_state, heuristic=self.master_heuristic)
+        (val, move) = self.halpha_beta_strat(current_state, self.master_heuristic, remaining_time, 2)
         return move
-        
+
 
 def retrace_path(preds, end):
     """
