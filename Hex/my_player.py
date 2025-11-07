@@ -29,81 +29,112 @@ class MyPlayer(PlayerHex):
         """
         super().__init__(piece_type, name)
     
-    def heuristic_parameters(self, state: GameState, nb_maillons: int):
+    def heuristic_parameters(self, state: GameState, nb_maillons: int, pcc):
         #TODO : update selon l'avancée de la game
-        '''if nb_maillons > 7 and state.step > 8:
-            return [state.step//2, 0.0, 0.0]
-        elif nb_maillons > 7 and state.step <= 8:
-            return [state.step//2, 0.0, 0.1]
-        elif nb_maillons <= 7 and state.step <= 8:
-            return [state.step//2, 0.5, 0.1]
-        else:
-            return [state.step//2, 0.5, 0.0]'''
-        if nb_maillons > 7 and state.step > 8:
+        '''if nb_maillons > 8 and state.step > 8:
             return [1.0, 0.0, 0.0]
         elif nb_maillons > 7 and state.step <= 8:
             return [1.0, 0.0, 0.1]
         elif nb_maillons <= 7 and state.step <= 8:
             return [1.0, 0.5, 0.1]
         else:
-            return [1.0, 0.5, 0.0]
+            return [1.0, 0.5, 0.0]'''
+        if pcc >= 11: # Si le chemin qu'il reste à parcourir est de moins de 4 tuiles : mettre la priorité dessus
+            return [1.0, 0.0, 0.0]
+        elif state.step > 30: # Si la  game est bien avancée, mettre l'accent sur le plus court chemin en faisant attention à la menace adverse
+            return [1.0, 0.0, 1.0]
+        else:
+            return [1.0, 0.5, 0.4]
     
-    def halpha_beta_strat(self, currentState: GameState, heuristic, remaining_time: int, depth_allowed: int):
-        
+    def halpha_beta_strategy(self, currentState: GameState, heuristic, remaining_time: int, depth_allowed: int):
+    
         start = time.time()
         time_to_play = remaining_time/(max(abs(13 - depth_allowed - currentState.step//2), 1e-4))
         
-        # Identify if we are player1 or player2
-        player1, player2 = currentState.players[0].id, currentState.players[1].id
-        opponent_piece_type = currentState.next_player.get_piece_type()
-        if opponent_piece_type == "R":
-            id_me = player2
-            id_opponent = player1
+        if self.piece_type == "R":
+            id_my_player = currentState.players[0].id
+            id_opponent = currentState.players[1].id
         else:
-            id_me = player1
-            id_opponent = player2
+            id_my_player = currentState.players[1].id
+            id_opponent = currentState.players[0].id
         
         def max_value(state: GameState, alpha, beta, depth):
             elapsed_time = time.time() - start
             if state.is_done():
-                return (state.scores[id_me], state.scores[id_opponent])
+                score1, score2 = 10000*(state.get_player_score(self) - state.get_player_score(state.compute_next_player())), None
+                return 10000*(state.scores[id_my_player] - state.scores[id_opponent]), None
             elif (not state.is_done()) and (depth == 0 or elapsed_time > time_to_play): # Si l'on a atteint la profondeur max à un état non terminal ou si le temps accordé pour jouer est épuisé
-                return (heuristic(state), -heuristic(state)) # Jeu à somme nulle : le score d'un joueur est l'opposé de l'autre
-            else:
-                v_star = -1.0*math.inf
-                m_star = "osef"
-                for a in state.generate_possible_light_actions():
-                    s_next = state.apply_action(a)
-                    v, _ = min_value(s_next, alpha, beta, depth-1)
-                    if v > v_star:
-                        v_star = v
-                        m_star = a
-                        alpha = max(alpha, v_star)
-                        if v_star >= beta:
-                            return (v_star, m_star)
-                return (v_star, m_star)
-
+                return heuristic(state), None
+            v_star = - math.inf
+            m_star = None
+            for a in state.get_possible_heavy_actions():
+                next_state = a.get_next_game_state()
+                v, _ = min_value(next_state, alpha, beta, depth-1)
+                if v > v_star:
+                    v_star = v
+                    m_star = a
+                    alpha = max(alpha, v_star)
+                if v_star >= beta:
+                    return v_star, m_star
+                
+            return (v_star, m_star)
+        
         def min_value(state: GameState, alpha, beta, depth):
             elapsed_time = time.time() - start
             if state.is_done():
-                return (state.scores[id_me], state.scores[id_opponent])
-            elif (not state.is_done()) and (depth == 0 or elapsed_time > time_to_play): # Si l'on a atteint la profondeur max à un état non terminal
-                return (heuristic(state), -heuristic(state)) # Jeu à somme nulle : le score d'un joueur est l'opposé de l'autre
-            else:
-                v_star = math.inf
-                m_star = "osef"
-                for a in state.generate_possible_light_actions():
-                    s_next = state.apply_action(a)
-                    v, _ = max_value(s_next, alpha, beta, depth-1)
-                    if v < v_star:
-                        v_star = v
-                        m_star = a
-                        beta = min(beta, v_star)
-                        if v_star <= alpha:
-                            return (v_star, m_star)
-                return (v_star, m_star)
-        return max_value(currentState, -math.inf, math.inf, depth_allowed)
+                score1, score2 = 10000*(state.get_player_score(self) - state.get_player_score(state.compute_next_player())), None
+                return 10000*(state.scores[id_my_player] - state.scores[id_opponent]), None
+            elif (not state.is_done()) and (depth == 0 or elapsed_time > time_to_play): # Si l'on a atteint la profondeur max à un état non terminal ou si le temps accordé pour jouer est épuisé
+                return heuristic(state), None
+            v_star = math.inf
+            m_star = None
+            
+            for a in state.get_possible_heavy_actions():
+                next_state = a.get_next_game_state()
+                v, _ = max_value(next_state, alpha, beta, depth-1)
+                if v < v_star:
+                    v_star = v
+                    m_star = a
+                    beta = min(beta, v_star)
+                if v_star <= alpha:
+                    return v_star, m_star
+                
+            return (v_star, m_star)
+        
+        return max_value(currentState, -math.inf, math.inf, depth_allowed)[1]
 
+    def heuristic_opponent_influence(self, state: GameState):
+        # Pour toute pièce sous notre contrôle, on calcule le nombre de voisins libres = calcul du territoire
+        turn_number = state.step
+        current_rep = state.get_rep()
+        territory = 0
+        
+        if self.piece_type == "B": #i.e. we are the first player to play
+            # Get all the red cases already played
+            nb_red_cases, red_cases = current_rep.get_pieces_player(state.players[0])
+            visited_empty_tiles = set()
+            for red_case in red_cases:
+                # Get neighbours list for each red tile
+                neighbours = state.get_neighbours(red_case[0], red_case[1])
+                for n_type, (ni, nj) in neighbours.values():
+                    if n_type == "EMPTY" and (ni, nj) not in visited_empty_tiles:
+                        visited_empty_tiles.add((ni, nj))
+                        influence = 1/turn_number*nb_red_cases
+                        # computes the total influence of the occupied territory relative to the number of 
+                        territory += influence
+        else:
+            # Get all the blue cases already played
+            nb_blue_cases, blue_cases = current_rep.get_pieces_player(state.players[0])
+            visited_empty_tiles = set()
+            for blue_case in blue_cases:
+                # Get neighbours list for each blue tile
+                neighbours = state.get_neighbours(blue_case[0], blue_case[1])
+                for n_type, (ni, nj) in neighbours.values():
+                    if n_type == "EMPTY" and (ni, nj) not in visited_empty_tiles:
+                        visited_empty_tiles.add((ni, nj))
+                        influence = 1/turn_number*nb_blue_cases # The territory influence decreases in the long term 
+                        territory += influence # computes the total influence of the occupied territory
+        return territory
 
     def heuristic_territory(self, state: GameState):
         # Pour toute pièce sous notre contrôle, on calcule le nombre de voisins libres = calcul du territoire
@@ -143,7 +174,7 @@ class MyPlayer(PlayerHex):
         #print(territory)
         return territory
     
-    def heuristic_maillon(self, state: GameState):
+    def count_maillons(self, state: GameState):
         """
         Heuristique qui compte le nombre de maillons contrôlés par un joueur pour un état donné
         """
@@ -227,6 +258,22 @@ class MyPlayer(PlayerHex):
                 
         return nb_maillons
     
+    def heuristic_maillon(self, state: GameState):
+        current_rep = state.get_rep()
+        env = current_rep.get_env()
+        d = current_rep.get_dimensions()
+        board = BoardHex(env=env, dim=d)
+        state_opponent = GameStateHex(
+            state.scores,
+            state.compute_next_player(),
+            state.players,
+            board,
+            step=state.step,
+        )
+        nb_maillons_me = self.count_maillons(state)
+        nb_maillons_opponent = self.count_maillons(state_opponent)
+        return nb_maillons_me #- 2*nb_maillons_opponent
+    
     def shortest_path(self, state: GameState):
         """
         Function to implement the logic of the player (here greedy selection of a feasible solution).
@@ -308,11 +355,11 @@ class MyPlayer(PlayerHex):
         
         my_shortest_path = self.shortest_path(state)
         #opponent_shortest_path = self.shortest_path(state_opponent)
-        return 13 - my_shortest_path # 13 est la longueur du chemin en ligne droite 
+        return 13 - my_shortest_path #+ 2*opponent_shortest_path # 13 est la longueur du chemin en ligne droite 
         
     
     def master_heuristic(self, state:GameState):
-        nb_maillons = self.heuristic_maillon(state)
+        '''nb_maillons = self.heuristic_maillon(state)
         params = self.heuristic_parameters(state, nb_maillons)
         pcc = self.heuristic_shortest_path(state)
         if params[0]*pcc - params[1]*nb_maillons > 3: # heuristique de PCC est trop forte
@@ -321,8 +368,16 @@ class MyPlayer(PlayerHex):
             params[1] = (params[0]*pcc - 2)/nb_maillons # ajuste le paramètre de l'heuristique pour repasser sous une valeur seuil
         if params[2] == 0:
             return (params[0]*pcc + params[1]*nb_maillons)/10
-        else:
-            return (params[0]*pcc + params[1]*nb_maillons + params[2]*self.heuristic_territory(state))/10
+        else:'''
+        nb_maillons = self.heuristic_maillon(state)
+        pcc = self.heuristic_shortest_path(state)
+        params = self.heuristic_parameters(state, nb_maillons, pcc)
+        opp_influence = self.heuristic_opponent_influence(state)
+        '''print("VALUES OF HEURISTICS - PCC - NB_M - OPP_INFL")
+        print(params[0]*pcc)
+        print(params[1]*nb_maillons)
+        print(params[2]*opp_influence)'''
+        return (params[0]*pcc + params[1]*nb_maillons) #+ params[2]*opp_influence)/10
             
 
     def compute_action(self, current_state: GameState, remaining_time: int = 1e9, **kwargs) -> Action:
@@ -434,18 +489,18 @@ class MyPlayer(PlayerHex):
                     # Check les maillons à la frontière nord
                     if i == 1:
                         # Maillon nord menacé (cas 1)
-                        if j >= 1 and j<= 12 and env.get((i-1,j)) != None and env.get((i-1,j+1)) == None:
+                        if j >= 1 and j<= 12 and env.get((i-1,j)) != None and env.get((i-1,j+1)) == None and env.get((i-1,j)).piece_type == piece_type_opponent:
                             return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
                         # Maillon nord menacé (cas 2)
-                        elif j >= 1 and j<= 12 and env.get((i-1,j)) == None and env.get((i-1,j+1)) != None:
+                        elif j >= 1 and j<= 12 and env.get((i-1,j)) == None and env.get((i-1,j+1)) != None and env.get((i-1,j+1)).piece_type == piece_type_opponent:
                             return LightAction({"piece": self.piece_type, "position": (i-1, j)})
                     # Check les maillons à la frontière sud
                     elif i == 12:
                         # Maillon sud menacé (cas 1)
-                        if j >= 1 and j<= 12 and env.get((i+1,j)) != None and env.get((i+1,j-1)) == None:
+                        if j >= 1 and j<= 12 and env.get((i+1,j)) != None and env.get((i+1,j-1)) == None and env.get((i+1,j)).piece_type == piece_type_opponent:
                             return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
                         # Maillon sud menacé (cas 2)
-                        if j >= 1 and j<= 12 and env.get((i+1,j)) == None and env.get((i+1,j-1)) != None:
+                        if j >= 1 and j<= 12 and env.get((i+1,j)) == None and env.get((i+1,j-1)) != None and env.get((i+1,j-1)).piece_type == piece_type_opponent:
                             return LightAction({"piece": self.piece_type, "position": (i+1, j)})
 
         else: #the color is blue
@@ -498,25 +553,32 @@ class MyPlayer(PlayerHex):
                     # Check les maillons à la frontière ouest
                     if j == 1:
                         # Maillon ouest menacé (cas 1)
-                        if i >= 1 and i <= 12 and env.get((i,j-1)) != None and env.get((i+1,j-1)) == None:
+                        if i >= 1 and i <= 12 and env.get((i,j-1)) != None and env.get((i+1,j-1)) == None and env.get((i,j-1)).piece_type == piece_type_opponent:
                             return LightAction({"piece": self.piece_type, "position": (i+1, j-1)})
                         # Maillon ouest menacé (cas 2)
-                        elif i >= 1 and i <= 12 and env.get((i,j-1)) == None and env.get((i+1,j-1)) != None:
+                        elif i >= 1 and i <= 12 and env.get((i,j-1)) == None and env.get((i+1,j-1)) != None and env.get((i+1,j-1)).piece_type == piece_type_opponent:
                             return LightAction({"piece": self.piece_type, "position": (i, j-1)})
                     # Check les maillons à la frontière est
                     elif j == 12:
                         # Maillon est menacé (cas 1)
-                        if i >= 1 and i <= 12 and env.get((i,j+1)) != None and env.get((i-1,j+1)) == None:
+                        if i >= 1 and i <= 12 and env.get((i,j+1)) != None and env.get((i-1,j+1)) == None and env.get((i,j+1)).piece_type == piece_type_opponent:
                             return LightAction({"piece": self.piece_type, "position": (i-1, j+1)})
                         # Maillon est menacé (cas 2)
-                        if i >= 1 and i <= 12 and env.get((i,j+1)) == None and env.get((i-1,j+1)) != None:
+                        if i >= 1 and i <= 12 and env.get((i,j+1)) == None and env.get((i-1,j+1)) != None and env.get((i-1,j+1)).piece_type == piece_type_opponent:
                             return LightAction({"piece": self.piece_type, "position": (i, j+1)})
         
         # Si aucun maillon n'est menacé, on prend le move donné par alpha-beta
         print("-------------------------------------")
         print("------ AUCUN MAILLON DE MENACE ------")
         print("-------------------------------------")
-        (val, move) = self.halpha_beta_strat(current_state, self.master_heuristic, remaining_time, 2)
+        
+        depth_allowed = 0
+        if current_state.step <= 11:
+            depth_allowed = 2
+        else:
+            depth_allowed = 3
+            
+        move = self.halpha_beta_strategy(current_state, self.master_heuristic, remaining_time, 2)
         return move
 
 
