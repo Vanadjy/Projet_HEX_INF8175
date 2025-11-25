@@ -11,12 +11,10 @@ idna==3.11
 loguru==0.7.0
 multidict==6.7.0
 nest-asyncio==1.6.0
-networkx==3.5
 numpy==2.3.4
 propcache==0.4.1
 python-engineio==4.12.3
 python-socketio==5.14.3
-scipy==1.16.3
 seahorse==1.1.6b5
 simple-websocket==1.1.0
 split==0.4

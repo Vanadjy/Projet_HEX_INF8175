@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 from player_hex import PlayerHex
 from seahorse.game.action import Action
 from seahorse.game.game_state import GameState
@@ -6,11 +5,11 @@ from game_state_hex import GameStateHex
 from board_hex import BoardHex
 from seahorse.utils.custom_exceptions import MethodNotImplementedError
 from seahorse.game.light_action import LightAction
+from random import randrange
 import numpy as np
 import heapq
 import time
-#import networkx as nx
-#from operator import itemgetter
+import json
 
 import math as math
 
@@ -21,6 +20,8 @@ class MyPlayer(PlayerHex):
     Attributes:
         piece_type (str): piece type of the player "R" for the first player and "B" for the second player
     """
+    
+    time_to_play = []
 
     def __init__(self, piece_type: str, name: str = "MyPlayer"):
         """
@@ -42,17 +43,17 @@ class MyPlayer(PlayerHex):
             return [1.0, 0.5, 0.1]
         else:
             return [1.0, 0.5, 0.0]'''
-        weight = (state.step+1)/(65)
-        return [weight, 0.5*(1-weight), 0.1*(1 - weight), (1 - weight)]
-    
-    def bridges_creation(self):
-        possible_inner_bridges = [(+1, -2), (-1, -1), (-2, +1), (-1, +2), (+1, +1), (+2, -1)]
-        pairs_completing_bridges = [((0, -1),(+1, -1)), ((0, -1), (-1, 0)), ((-1, 0), (-1, +1)), ((0, +1), (-1, +1)), ((0, +1), (+1, 0)), ((+1, 0), (+1, -1))]
-        return possible_inner_bridges, pairs_completing_bridges
+        if pcc >= 11: # Si le chemin qu'il reste à parcourir est de moins de 4 tuiles : mettre la priorité dessus
+            return [1.0, 0.0, 0.0]
+        elif state.step > 30: # Si la  game est bien avancée, mettre l'accent sur le plus court chemin en faisant attention à la menace adverse
+            return [1.0, 0.0, 1.0]
+        else:
+            return [1.0, 0.5, 0.4]
     
     def halpha_beta_strategy(self, currentState: GameState, heuristic, remaining_time: int, depth_allowed: int):
     
         start = time.time()
+        elapsed_time = 0.0
         time_to_play = remaining_time/(max(abs(13 - depth_allowed - currentState.step//2), 1e-4))
         
         if self.piece_type == "R":
@@ -106,8 +107,82 @@ class MyPlayer(PlayerHex):
             return (v_star, m_star)
         
         return max_value(currentState, -math.inf, math.inf, depth_allowed)[1]
+    
+    def halpha_beta_strategy_typeB(self, currentState: GameState, heuristic, remaining_time: int, depth_allowed: int):
+    
+        start = time.time()
+        elapsed_time = 0.0
+        time_to_play = remaining_time/(max(abs(13 - depth_allowed - currentState.step//2), 1e-4))
+        
+        if self.piece_type == "R":
+            id_my_player = currentState.players[0].id
+            id_opponent = currentState.players[1].id
+        else:
+            id_my_player = currentState.players[1].id
+            id_opponent = currentState.players[0].id
+        
+        def max_value(state: GameState, alpha, beta, depth):
+            elapsed_time = time.time() - start
+            if state.is_done():
+                score1, score2 = 10000*(state.get_player_score(self) - state.get_player_score(state.compute_next_player())), None
+                return 10000*(state.scores[id_my_player] - state.scores[id_opponent]), None
+            elif (not state.is_done()) and (depth == 0 or elapsed_time > time_to_play): # Si l'on a atteint la profondeur max à un état non terminal ou si le temps accordé pour jouer est épuisé
+                return heuristic(state), None
+            v_star = - math.inf
+            m_star = None
+            
+            # calcul des prochains états
+            next_states = {a:heuristic(a.get_next_game_state()) for a in state.get_possible_heavy_actions()}
+            
+            # tri des états les plus prometteurs selon l'heuristique
+            sorted_states = dict(sorted(next_states.items(), key=lambda item: item[1])).keys()
+            # récupération des 10 états les plus prometteurs
+            promising_states = list(sorted_states)[:10]
+            for a in promising_states:
+                next_state = a.get_next_game_state()
+                v, _ = min_value(next_state, alpha, beta, depth-1)
+                if v > v_star:
+                    v_star = v
+                    m_star = a
+                    alpha = max(alpha, v_star)
+                if v_star >= beta:
+                    return v_star, m_star
+                
+            return (v_star, m_star)
+        
+        def min_value(state: GameState, alpha, beta, depth):
+            elapsed_time = time.time() - start
+            if state.is_done():
+                score1, score2 = 10000*(state.get_player_score(self) - state.get_player_score(state.compute_next_player())), None
+                return 10000*(state.scores[id_my_player] - state.scores[id_opponent]), None
+            elif (not state.is_done()) and (depth == 0 or elapsed_time > time_to_play): # Si l'on a atteint la profondeur max à un état non terminal ou si le temps accordé pour jouer est épuisé
+                return heuristic(state), None
+            v_star = math.inf
+            m_star = None
+            # calcul des prochains états
+            next_states = {a:heuristic(a.get_next_game_state()) for a in state.get_possible_heavy_actions()}
+            
+            # tri des états les plus prometteurs selon l'heuristique
+            sorted_states = dict(sorted(next_states.items(), key=lambda item: item[1])).keys()
+            # récupération des 10 états les plus prometteurs
+            promising_states = list(sorted_states)[:10]
+            
+            for a in promising_states:
+                next_state = a.get_next_game_state()
+                v, _ = max_value(next_state, alpha, beta, depth-1)
+                if v < v_star:
+                    v_star = v
+                    m_star = a
+                    beta = min(beta, v_star)
+                if v_star <= alpha:
+                    return v_star, m_star
+                
+            return (v_star, m_star)
+        
+        return max_value(currentState, -math.inf, math.inf, depth_allowed)[1]
 
     def heuristic_opponent_influence(self, state: GameState):
+        # Pour toute pièce sous notre contrôle, on calcule le nombre de voisins libres = calcul du territoire
         turn_number = state.step
         current_rep = state.get_rep()
         territory = 0
@@ -122,7 +197,8 @@ class MyPlayer(PlayerHex):
                 for n_type, (ni, nj) in neighbours.values():
                     if n_type == "EMPTY" and (ni, nj) not in visited_empty_tiles:
                         visited_empty_tiles.add((ni, nj))
-                        influence = 1/(abs(6.5 - nj) + abs(6.5 - ni))                        # computes the total influence of the occupied territory relative to the number of 
+                        influence = 1/turn_number*nb_red_cases
+                        # computes the total influence of the occupied territory relative to the number of 
                         territory += influence
         else:
             # Get all the blue cases already played
@@ -134,7 +210,7 @@ class MyPlayer(PlayerHex):
                 for n_type, (ni, nj) in neighbours.values():
                     if n_type == "EMPTY" and (ni, nj) not in visited_empty_tiles:
                         visited_empty_tiles.add((ni, nj))
-                        influence = 1/(abs(6.5 - nj) + abs(6.5 - ni))                        
+                        influence = 1/turn_number*nb_blue_cases # The territory influence decreases in the long term 
                         territory += influence # computes the total influence of the occupied territory
         return territory
 
@@ -158,7 +234,7 @@ class MyPlayer(PlayerHex):
                 for n_type, (ni, nj) in neighbours.values():
                     if n_type == "EMPTY" and (ni, nj) not in visited_empty_tiles:
                         visited_empty_tiles.add((ni, nj))
-                        influence = 1/(abs(6.5 - nj)^2 + abs(6.5 - ni)^2)
+                        influence = 1/turn_number*(1 + abs(nj - ni))
                         # computes the total influence of the occupied territory relative to the number of 
                         territory += influence/nb_empty_cases
         else:
@@ -171,7 +247,7 @@ class MyPlayer(PlayerHex):
                 for n_type, (ni, nj) in neighbours.values():
                     if n_type == "EMPTY" and (ni, nj) not in visited_empty_tiles:
                         visited_empty_tiles.add((ni, nj))
-                        influence = 1/(abs(6.5 - nj) + abs(6.5 - ni))
+                        influence = 1/turn_number*(1 + abs(nj - ni)) # The territory influence decreases in the long term 
                         territory += influence/nb_empty_cases # computes the total influence of the occupied territory
         #print(territory)
         return territory
@@ -273,27 +349,8 @@ class MyPlayer(PlayerHex):
             step=state.step,
         )
         nb_maillons_me = self.count_maillons(state)
-        #nb_maillons_opponent = self.count_maillons(state_opponent)
-        return nb_maillons_me
-    
-    def control_centre(self, state: GameState):
-        # Invite the player to play near the centre of the board
-        current_rep = state.get_rep()
-        territory = 0
-        if self.piece_type == "R":
-            for empty in current_rep.get_empty():
-                ni, nj = empty
-                centre_influence = 1/(abs(6.5 - nj) + abs(6.5 - ni))
-                if territory < centre_influence:
-                    territory = centre_influence
-            return territory
-        else:
-            for empty in current_rep.get_empty():
-                ni, nj = empty
-                centre_influence = 1/(abs(6.5 - nj) + abs(6.5 - ni))
-                if territory < centre_influence:
-                    territory = centre_influence
-            return territory
+        nb_maillons_opponent = self.count_maillons(state_opponent)
+        return nb_maillons_me #- 2*nb_maillons_opponent
     
     def shortest_path(self, state: GameState):
         """
@@ -314,9 +371,6 @@ class MyPlayer(PlayerHex):
         preds = np.full((state.rep.dimensions[0], state.rep.dimensions[1]), None, dtype=tuple)
         objectives = []
         pq = []
-        
-        possible_inner_bridges, pairs_completing_bridges = self.bridges_creation()
-        
         if self.piece_type == "R":
             for j in range(state.rep.dimensions[1]):
                 objectives.append((state.rep.dimensions[0]-1, j))
@@ -325,19 +379,6 @@ class MyPlayer(PlayerHex):
                 elif env.get((0,j)).piece_type == "R":
                     dist[0, j] = 0
                 else:
-                    ## DETECTION MAILLONS INTERNES ##
-                    for index in range(len(possible_inner_bridges)):
-                        dx_bridge, dy_bridge = possible_inner_bridges[index]
-                        # Si on détecte un maillon
-                        if state.in_board((dx_bridge, j + dy_bridge)) and (env.get((dx_bridge, j + dy_bridge)) is not None) and (env.get((dx_bridge, j + dy_bridge)).piece_type == 'B'):
-                            complete_bridge_1, complete_bridge_2 = pairs_completing_bridges[index]
-                            dx_b1, dy_b1 = complete_bridge_1
-                            dx_b2, dy_b2 = complete_bridge_2
-                            # Confirmation que nous avons un maillon
-                            if (env.get((dx_b1, j+dy_b1)) is None) and (env.get((dx_b2, j+dy_b2)) is None):
-                                # Forcer à passer ailleurs, même si la case est vide
-                                dist[dx_b1, j+dy_b1] = np.inf
-                                dist[dx_b2, j+dy_b2] = np.inf
                     continue
                 heapq.heappush(pq, (dist[0, j], (0, j), None))
 
@@ -349,21 +390,9 @@ class MyPlayer(PlayerHex):
                 elif env.get((i,0)).piece_type == "B":
                     dist[i, 0] = 0
                 else:
-                    ## DETECTION MAILLONS INTERNES ##
-                    for index in range(len(possible_inner_bridges)):
-                        dx_bridge, dy_bridge = possible_inner_bridges[index]
-                        # Si on détecte un maillon
-                        if state.in_board((i + dx_bridge, dy_bridge)) and (env.get((i + dx_bridge, dy_bridge)) is not None) and (env.get((i + dx_bridge, dy_bridge)).piece_type == 'R'):
-                            complete_bridge_1, complete_bridge_2 = pairs_completing_bridges[index]
-                            dx_b1, dy_b1 = complete_bridge_1
-                            dx_b2, dy_b2 = complete_bridge_2
-                            # Confirmation que nous avons un maillon
-                            if (env.get((i + dx_b1, dy_b1)) is None) and (env.get((i + dx_b2, dy_b2)) is None):
-                                # Forcer à passer ailleurs, même si la case est vide
-                                dist[i + dx_b1, dy_b1] = np.inf
-                                dist[i + dx_b2, dy_b2] = np.inf
                     continue
                 heapq.heappush(pq, (dist[i, 0], (i, 0), None))
+
         while len(pq) != 0:
             d, (i, j), pred = heapq.heappop(pq)
             if d > dist[i, j]:
@@ -390,117 +419,22 @@ class MyPlayer(PlayerHex):
     
     def heuristic_shortest_path(self, state: GameState):
         # Reconstruit le même état mais pour l'autre joueur (adversaire)
-        current_rep = state.get_rep()
+        '''current_rep = state.get_rep()
         env = current_rep.get_env()
+        d = current_rep.get_dimensions()
+        board = BoardHex(env=env, dim=d)
+        state_opponent = GameStateHex(
+            state.scores,
+            state.compute_next_player(),
+            state.players,
+            board,
+            step=state.step,
+        )'''
         
         my_shortest_path = self.shortest_path(state)
         #opponent_shortest_path = self.shortest_path(state_opponent)
         return 13 - my_shortest_path #+ 2*opponent_shortest_path # 13 est la longueur du chemin en ligne droite 
-
-    def shortest_path_graph(self, state:GameState, my_piece_type, opponent_piece_type):
-        assert (my_piece_type != opponent_piece_type), "Piece type error : each player must have a different piece type"
-        assert (my_piece_type == 'R' or my_piece_type == 'B'), "Piece type error : a player must be blue ('B') or red ('R')"
-        # création d'une grille de jeu
-        current_rep = state.get_rep()
-        env = current_rep.get_env()
-        N = state.get_rep().get_dimensions()[0]
-
-        nb_blue_cases, blue_cases = current_rep.get_pieces_player(state.players[1])
-        nb_red_cases, red_cases = current_rep.get_pieces_player(state.players[0])
-        grid = {(q, r): 'EMPTY' for r in range(N) for q in range(N)}
-        for bx, by in blue_cases:
-            grid[bx, by] = 'B'
-        for rx, ry in red_cases:
-            grid[rx, ry] = 'R'
         
-        Graph_board  = build_hex_graph(state)
-        
-        if my_piece_type == 'R':
-            max_red = max(red_cases, key=itemgetter(1))[1]
-            min_red = min(red_cases, key=itemgetter(1))[1]
-            sources = [(0,j) for j in range(min_red, max_red+1)]
-            targets = [(13,j) for j in range(min_red, max_red+1)]
-        else:
-            max_blue = max(blue_cases, key=itemgetter(0))[0]
-            min_blue = min(blue_cases, key=itemgetter(0))[0]
-            sources = [(j, 0) for j in range(min_blue, max_blue+1)]
-            targets = [(j, 13) for j in range(min_blue, max_blue+1)]
-        
-        def edge_cost(node_1, node_2):
-            if grid[node_1] == my_piece_type or grid[node_2] == my_piece_type:
-                if grid[node_1] == my_piece_type and grid[node_2] == my_piece_type:
-                    return 0
-                else:
-                    return 1
-            elif grid[node_1] == opponent_piece_type or grid[node_2] == opponent_piece_type:
-                return math.inf
-            else:
-                return 2
-        
-        def bridge_edge_cost(G, node_1, node_2):
-            neighbors_node1 = set(Graph_board.neighbors(node_1))
-            neighbors_node2 = set(Graph_board.neighbors(node_2))
-            # get neighbors of node2 that are not neighbors of node1
-            diff_neighbors = neighbors_node2 - neighbors_node1
-            for possible_bridge in diff_neighbors:
-                # Règle de détection d'un maillon
-                if grid[node_1] == grid[possible_bridge] and grid[node_1] == opponent_piece_type:
-                    neighbors_possible_bridge = set(Graph_board.neighbors(possible_bridge))
-                    common_neighbors = list(neighbors_possible_bridge & neighbors_node1)
-                    #check that node1 and node2 are not neighbors and of the type of the opponent
-                    if len(common_neighbors) == 2 and grid[common_neighbors[0]] == 'EMPTY' and grid[common_neighbors[1]] == 'EMPTY':
-                        for final_node in neighbors_node2:
-                            G[node_2][final_node]["weight"] = math.inf
-                    
-        for u, v in Graph_board.edges():
-            Graph_board[u][v]["weight"] = edge_cost(u, v)
-            bridge_edge_cost(Graph_board, u, v)
-                
-        
-        current_sp = None
-        sp_value = math.inf
-        for source in sources:
-            for target in targets:
-                sp = nx.shortest_path(Graph_board, source, target, weight="weight")
-                if len(sp) < sp_value:
-                    sp_value = len(sp)
-                    current_sp = sp
-        for sp_element in current_sp:
-            if env.get(sp_element) is not None:
-                current_sp.remove(sp_element)
-        return current_sp, sp_value
-    
-    def heuristic_block_avance(self, state):
-        block = 0
-        current_rep = state.get_rep()
-        if self.piece_type == 'R':
-            nb_blue_cases, blue_cases = current_rep.get_pieces_player(state.players[1])
-            opp_shortest_path, opp_shortest_path_len = self.shortest_path_graph(state, 'B', self.piece_type)
-            for blue_case in blue_cases:
-                i, j = blue_case
-                neighbours_positions = state.get_neighbours(i,j).values()
-                # Regarder les voisins des voisins
-                for n_type, (ni, nj) in neighbours_positions:
-                    if n_type == "EMPTY": # on cherche à se placer à une case vide des cases adverses
-                        neighbours_of_neighbor = state.get_neighbours(ni, nj)
-                        for m_type, (mi, mj) in neighbours_of_neighbor.values():
-                            if (mi, mj) in opp_shortest_path:
-                                block += 1
-        else:
-            nb_red_cases, red_cases = current_rep.get_pieces_player(state.players[0])
-            opp_shortest_path, opp_shortest_path_len = self.shortest_path_graph(state, 'R', self.piece_type)
-            for red_case in red_cases:
-                i, j = red_case
-                neighbours_positions = state.get_neighbours(i,j).values()
-                # Regarder les voisins des voisins
-                for n_type, (ni, nj) in neighbours_positions:
-                    if n_type == "EMPTY": # on cherche à se placer à une case vide des cases adverses
-                        neighbours_of_neighbor = state.get_neighbours(ni, nj)
-                        for m_type, (mi, mj) in neighbours_of_neighbor.values():
-                            # Si voisin d'ordre 2 et de notre couleur : forme de blocage
-                            if (mi, mj) in opp_shortest_path:
-                                block += 1
-        return block
     
     def master_heuristic(self, state:GameState):
         '''nb_maillons = self.heuristic_maillon(state)
@@ -517,13 +451,11 @@ class MyPlayer(PlayerHex):
         pcc = self.heuristic_shortest_path(state)
         params = self.heuristic_parameters(state, nb_maillons, pcc)
         #opp_influence = self.heuristic_opponent_influence(state)
-        #get_centre = self.control_centre(state)
-        
         '''print("VALUES OF HEURISTICS - PCC - NB_M - OPP_INFL")
         print(params[0]*pcc)
         print(params[1]*nb_maillons)
-        print(params[3]*get_centre)'''
-        return params[0]*pcc + params[1]*nb_maillons #+ params[3]*get_centre #+ 0.4*params[2]*opp_influence
+        print(params[2]*opp_influence)'''
+        return (params[0]*pcc + params[1]*nb_maillons) #+ params[2]*opp_influence)/10
             
 
     def compute_action(self, current_state: GameState, remaining_time: int = 1e9, **kwargs) -> Action:
@@ -539,77 +471,91 @@ class MyPlayer(PlayerHex):
         possible_actions = current_state.get_possible_light_actions()
         current_rep = current_state.get_rep()
         env = current_rep.env
+        start = time.time()
         
-        '''# Opening moves
-        if current_state.step < 2:
-            if self.piece_type == "R":
-                if current_state.step == 0: #premier tour à jouer pour les rouge (toujours possible de jouer)
-                    opening = LightAction({"piece": self.piece_type, "position": (10, 5)})
-                    return opening
-            else:
-                opening = LightAction({"piece": self.piece_type, "position": (4, 8)})
-                if opening in possible_actions:
-                    return opening
-                else: # If our opening is already taken, try to counter it
-                    return LightAction({"piece": self.piece_type, "position": (8, 4)})
+        choose_open = randrange(2)
         
-        # First Answer moves
-        elif current_state.step < 4:
-            if self.piece_type == "R":
-                if current_state.step == 2: #second tour à jouer pour les rouge (toujours possible de jouer)
-                    nb_blue_cases, blue_cases = current_rep.get_pieces_player(current_state.players[1])
-                    if blue_cases[0] == (4, 8):
-                        first_answer = LightAction({"piece": self.piece_type, "position": (9, 8)})
-                        return first_answer
-                    else:
-                        return LightAction({"piece": self.piece_type, "position": (4, 8)})
-            else:
-                nb_red_cases, red_cases = current_rep.get_pieces_player(current_state.players[0])
-                if red_cases[-1] == (9, 8):
-                    first_answer = LightAction({"piece": self.piece_type, "position": (8, 4)})
-                    if first_answer in possible_actions:
-                        return first_answer
-                    elif LightAction({"piece": self.piece_type, "position": (4, 8)}) in possible_actions: # If our opening is already taken, try to counter it
-                        return LightAction({"piece": self.piece_type, "position": (4, 8)})
-                    else:
-                        return LightAction({"piece": self.piece_type, "position": (3, 4)})
+        if choose_open == 0:
+            # Opening moves
+            if current_state.step < 2:
+                if self.piece_type == "R":
+                    if current_state.step == 0: #premier tour à jouer pour les rouge (toujours possible de jouer)
+                        opening = LightAction({"piece": self.piece_type, "position": (8, 4)})
+                        return opening
                 else:
-                    first_answer = LightAction({"piece": self.piece_type, "position": (10, 3)})
-                    if first_answer in possible_actions:
-                        return first_answer'''
-                
-        # Opening moves
-        if current_state.step < 2:
-            if self.piece_type == "R":
-                if current_state.step == 0: #premier tour à jouer pour les rouge (toujours possible de jouer)
-                    opening = LightAction({"piece": self.piece_type, "position": (8, 5)})
-                    return opening
-            else:
-                opening = LightAction({"piece": self.piece_type, "position": (5, 5)})
-                if opening in possible_actions:
-                    return opening
-                else: # If our opening is already taken, try to counter it
-                    return LightAction({"piece": self.piece_type, "position": (6, 5)})
-        
-        # First Answer moves
-        elif current_state.step < 4:
-            if self.piece_type == "R":
-                if current_state.step == 2: #second tour à jouer pour les rouge (toujours possible de jouer)
-                    nb_blue_cases, blue_cases = current_rep.get_pieces_player(current_state.players[1])
-                    first_answer = LightAction({"piece": self.piece_type, "position": (4, 9)})
-                    if first_answer in possible_actions:
-                        return first_answer
-                    else:
-                        return LightAction({"piece": self.piece_type, "position": (4, 8)})
-            else:
-                nb_red_cases, red_cases = current_rep.get_pieces_player(current_state.players[0])
-                first_answer = LightAction({"piece": self.piece_type, "position": (7, 9)})
-                if first_answer in possible_actions:
-                    return first_answer
-                elif LightAction({"piece": self.piece_type, "position": (8, 9)}) in possible_actions: # If our opening is already taken, try to counter it
-                    return LightAction({"piece": self.piece_type, "position": (8, 9)})
+                    opening = LightAction({"piece": self.piece_type, "position": (4, 8)})
+                    if opening in possible_actions:
+                        return opening
+                    else: # If our opening is already taken, try to counter it
+                        return LightAction({"piece": self.piece_type, "position": (8, 4)})
+            
+            # First Answer moves
+            elif current_state.step < 4:
+                if self.piece_type == "R":
+                    if current_state.step == 2: #second tour à jouer pour les rouge (toujours possible de jouer)
+                        nb_blue_cases, blue_cases = current_rep.get_pieces_player(current_state.players[1])
+                        if blue_cases[0] == (3, 10):
+                            first_answer = LightAction({"piece": self.piece_type, "position": (4, 10)})
+                            return first_answer
+                        else:
+                            return LightAction({"piece": self.piece_type, "position": (3, 10)})
                 else:
-                    return LightAction({"piece": self.piece_type, "position": (6, 9)})
+                    nb_red_cases, red_cases = current_rep.get_pieces_player(current_state.players[0])
+                    if red_cases[-1] == (9, 8):
+                        first_answer = LightAction({"piece": self.piece_type, "position": (8, 4)})
+                        if first_answer in possible_actions:
+                            return first_answer
+                        elif LightAction({"piece": self.piece_type, "position": (4, 8)}) in possible_actions: # If our opening is already taken, try to counter it
+                            return LightAction({"piece": self.piece_type, "position": (4, 8)})
+                        else:
+                            return LightAction({"piece": self.piece_type, "position": (3, 4)})
+                    else:
+                        first_answer = LightAction({"piece": self.piece_type, "position": (10, 3)})
+                        if first_answer in possible_actions:
+                            return first_answer
+        else: 
+            if current_state.step < 2:
+                if self.piece_type == "R":
+                    if current_state.step == 0: #premier tour à jouer pour les rouge (toujours possible de jouer)
+                        opening = LightAction({"piece": self.piece_type, "position": (5, 7)})
+                        return opening
+                else:
+                    opening = LightAction({"piece": self.piece_type, "position": (7, 5)})
+                    if opening in possible_actions:
+                        return opening
+                    else: # If our opening is already taken, try to counter it
+                        return LightAction({"piece": self.piece_type, "position": (7, 6)})
+            
+            # First Answer moves
+            elif current_state.step < 4:
+                if self.piece_type == "R":
+                    if current_state.step == 2: #second tour à jouer pour les rouge (toujours possible de jouer)
+                        nb_blue_cases, blue_cases = current_rep.get_pieces_player(current_state.players[1])
+                        if blue_cases[0] == (6, 6):
+                            first_answer = LightAction({"piece": self.piece_type, "position": (6, 7)})
+                            return first_answer
+                        elif blue_cases[0] == (6, 7):
+                            first_answer = LightAction({"piece": self.piece_type, "position": (6, 6)})
+                            return first_answer
+                        elif blue_cases[0] == (7, 6):
+                            first_answer = LightAction({"piece": self.piece_type, "position": (6, 9)})
+                            return first_answer
+                        else:
+                            return LightAction({"piece": self.piece_type, "position": (7, 6)})
+                else:
+                    nb_red_cases, red_cases = current_rep.get_pieces_player(current_state.players[0])
+                    if red_cases[-1] == (9, 8):
+                        first_answer = LightAction({"piece": self.piece_type, "position": (8, 4)})
+                        if first_answer in possible_actions:
+                            return first_answer
+                        elif LightAction({"piece": self.piece_type, "position": (4, 8)}) in possible_actions: # If our opening is already taken, try to counter it
+                            return LightAction({"piece": self.piece_type, "position": (4, 8)})
+                        else:
+                            return LightAction({"piece": self.piece_type, "position": (3, 4)})
+                    else:
+                        first_answer = LightAction({"piece": self.piece_type, "position": (10, 3)})
+                        if first_answer in possible_actions:
+                            return first_answer
         # General strategy : alpha-beta pruning with heuristic
         #(val, move) = self.halpha_beta_strat(current_state, heuristic=self.master_heuristic)
         """if val ==1 or val == -1: # Si le alpha-beta nous renvoie une situation de victoire ou défaite immédiate, jouer le move indiqué
@@ -755,8 +701,21 @@ class MyPlayer(PlayerHex):
         else:
             depth_allowed = 3
             
-        move = self.halpha_beta_strategy(current_state, self.master_heuristic, remaining_time, 2)
+        #move, time_to_play = self.halpha_beta_strategy(current_state, self.master_heuristic, remaining_time, 2)
+        move = self.halpha_beta_strategy_typeB(current_state, self.master_heuristic, remaining_time, depth_allowed)
+        time_played = time.time() - start
+        self.time_to_play.append(time_played)
+        next_state = move.get_next_game_state()
+        opponent_time_to_play = current_state.next_player.time_to_play
+        if next_state.is_done(): # the next move finishes the game
+            with open("time_played/typeB-"+str(time.time()), "w") as fp:
+                json.dump(self.time_to_play, fp)
+            fp.close
+            with open("time_played/typeA-"+str(time.time()), "w") as fp:
+                json.dump(opponent_time_to_play, fp)
+            fp.close
         return move
+
 
 def retrace_path(preds, end):
     """
@@ -768,22 +727,3 @@ def retrace_path(preds, end):
         path.append(current)
         current = preds[current]
     return path
-
-# -------------------------------
-# Construire le graphe complet du plateau Hex
-# -------------------------------
-def build_hex_graph(state):
-    G = nx.Graph()
-    neigh_offsets = [(+1, 0), (-1, 0), (0, +1), (0, -1), (+1, -1), (-1, +1)]
-    N = state.get_rep().get_dimensions()[0]
-    for r in range(N):
-        for q in range(N):
-            G.add_node((q, r))
-
-    for r in range(N):
-        for q in range(N):
-            for dq, dr in neigh_offsets:
-                nq, nr = q + dq, r + dr
-                if state.in_board((nq, nr)):
-                    G.add_edge((q, r), (nq, nr))
-    return G
